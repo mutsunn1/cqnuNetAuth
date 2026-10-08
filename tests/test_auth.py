@@ -68,6 +68,41 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(sleep.call_count, 2)
         self.assertIn("当前已认证，无需重复登录。\n认证成功。", output.getvalue())
 
+    def test_show_response_displays_actual_failure_fields(self):
+        payload = json.dumps({"result": 0, "msg": "测试错误", "ret_code": 99})
+        output = io.StringIO()
+        with patch("sys.argv", ["auth.py", "--show-response"]), \
+             patch("auth.load_config", return_value=self.config), \
+             patch("auth.urllib.request.build_opener") as build, \
+             contextlib.redirect_stdout(output):
+            build.return_value.open.return_value.__enter__.return_value.read.return_value = payload.encode()
+            self.assertEqual(auth.main(), 1)
+        self.assertIn('"msg": "测试错误"', output.getvalue())
+        self.assertIn('"ret_code": 99', output.getvalue())
+
+    def test_response_display_redacts_jsonp_and_url_encoded_credentials(self):
+        values = []
+        for key in ("account", "password"):
+            secret = self.config[key]
+            values.extend([secret, urllib.parse.quote(secret, safe=""),
+                           urllib.parse.quote_plus(secret, safe="").lower()])
+        payload = json.dumps({"result": 0, "msg": "请勿重复登录", "echo": values})
+        displayed = auth.response_for_display(f"dr1005({payload});", self.config)
+        self.assertIn("请勿重复登录", displayed)
+        for value in values:
+            self.assertNotIn(value, displayed)
+        self.assertEqual(json.loads(displayed)["echo"], ["[REDACTED]"] * len(values))
+
+    def test_response_display_redacts_json_special_characters(self):
+        config = {"account": "demo", "password": 'secret"\\\n中文'}
+        displayed = auth.response_for_display(json.dumps({"msg": config["password"]}), config)
+        self.assertEqual(json.loads(displayed)["msg"], "[REDACTED]")
+
+    def test_response_display_omits_unparseable_body(self):
+        displayed = auth.response_for_display("<html>" + self.config["password"], self.config)
+        self.assertNotIn(self.config["password"], displayed)
+        self.assertIn("已省略原文", displayed)
+
     def test_http_ok_is_not_authentication_success(self):
         for body in ('<html>login</html>', '{}', '[]', '{"result":0}',
                      '{"result":true}', 'other({"result":1});'):

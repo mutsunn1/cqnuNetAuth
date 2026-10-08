@@ -98,7 +98,7 @@ def build_url(config):
     return ENDPOINT + "?" + urllib.parse.urlencode(params)
 
 
-def parse_response(body):
+def decode_response(body):
     text = body.strip()
     match = re.fullmatch(r"dr1005\s*\((.*)\)\s*;?", text, re.DOTALL)
     if match:
@@ -109,6 +109,31 @@ def parse_response(body):
         raise AuthError("认证服务器返回了无法识别的内容。") from None
     if not isinstance(data, dict):
         raise AuthError("认证服务器响应格式不正确。")
+    return data
+
+
+def response_for_display(body, config):
+    """保留响应字段和消息，隐藏已知凭据；不显示无法解析的原文。"""
+    try:
+        data = decode_response(body)
+    except AuthError:
+        return "响应不是可识别的 JSON/JSONP，已省略原文。"
+    text = json.dumps(data, ensure_ascii=False)
+    secrets = set()
+    for key in ("account", "password"):
+        value = config[key]
+        secrets.add(json.dumps(value, ensure_ascii=False)[1:-1])
+        secrets.add(json.dumps(value, ensure_ascii=True)[1:-1])
+        secrets.add(urllib.parse.quote(value, safe=""))
+        secrets.add(urllib.parse.quote_plus(value, safe=""))
+    for secret in sorted(secrets, key=len, reverse=True):
+        if secret:
+            text = re.sub(re.escape(secret), "[REDACTED]", text, flags=re.IGNORECASE)
+    return text
+
+
+def parse_response(body):
+    data = decode_response(body)
     for key in ("msg", "message"):
         message = data.get(key)
         if isinstance(message, str) and "请勿重复登录" in message:
@@ -119,7 +144,7 @@ def parse_response(body):
     raise AuthError("服务器未确认认证成功：请检查凭据、IP，或是否已经在线。")
 
 
-def authenticate(config):
+def authenticate(config, show_response=False):
     request = urllib.request.Request(build_url(config), headers={
         "User-Agent": "Mozilla/5.0", "Referer": f"http://{HOST}/",
         "Accept": "*/*", "Accept-Encoding": "identity",
@@ -130,7 +155,11 @@ def authenticate(config):
             body = response.read(65537)
             if len(body) > 65536:
                 raise AuthError("认证响应过大，已停止处理。")
-            return parse_response(body.decode("utf-8"))
+            text = body.decode("utf-8")
+            if show_response:
+                print("服务器响应（已遮盖配置中的账号和密码）：" +
+                      response_for_display(text, config), flush=True)
+            return parse_response(text)
     except urllib.error.HTTPError as error:
         raise AuthError(f"认证服务器返回 HTTP {error.code}，请检查校园网连接。") from None
     except (urllib.error.URLError, OSError, UnicodeError, ValueError):
@@ -142,6 +171,7 @@ def main():
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="本地配置路径")
     parser.add_argument("--init", action="store_true", help="交互创建配置，不覆盖已有文件")
     parser.add_argument("--watch", action="store_true", help="定期重新认证，掉线后自动重试")
+    parser.add_argument("--show-response", action="store_true", help="显示服务器 JSON 响应，遮盖配置中的账号和密码")
     parser.add_argument("--interval", type=int, default=300, help="重试间隔（秒，至少 30，默认 300）")
     args = parser.parse_args()
     if args.interval < 30:
@@ -153,7 +183,7 @@ def main():
         config = load_config(args.config)
         while True:
             try:
-                print(authenticate(config), flush=True)
+                print(authenticate(config, show_response=args.show_response), flush=True)
                 status = 0
             except AuthError as error:
                 print(str(error), flush=True)
