@@ -136,8 +136,11 @@ def parse_response(body):
     data = decode_response(body)
     for key in ("msg", "message"):
         message = data.get(key)
-        if isinstance(message, str) and "请勿重复登录" in message:
-            return "当前已认证，无需重复登录。"
+        if isinstance(message, str):
+            if message.strip().rstrip("！!") == "终端IP已在线":
+                return "当前终端 IP 已在线，无需重复登录。"
+            if "请勿重复登录" in message:
+                return "当前已认证，无需重复登录。"
     if type(data.get("result")) in (int, str) and str(data["result"]) == "1":
         return "认证成功。"
     # 不输出服务器原文，其中可能回显账号或密码。

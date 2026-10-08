@@ -40,6 +40,15 @@ class AuthTests(unittest.TestCase):
                     with self.subTest(key=key, escaped=escaped, body=body):
                         self.assertEqual(auth.parse_response(body), "当前已认证，无需重复登录。")
 
+    def test_observed_terminal_ip_online_response(self):
+        payload = json.dumps({"result": 0, "msg": "终端IP已在线！", "ret_code": 2})
+        for body in (payload, f"dr1005({payload});"):
+            self.assertEqual(auth.parse_response(body), "当前终端 IP 已在线，无需重复登录。")
+
+    def test_ret_code_alone_does_not_imply_online(self):
+        with self.assertRaises(auth.AuthError):
+            auth.parse_response('{"result": 0, "msg": "其他错误", "ret_code": 2}')
+
     def test_invalid_message_values_are_not_online(self):
         for value in (None, 123, ["请勿重复登录"], {"text": "请勿重复登录"}):
             with self.subTest(value=value), self.assertRaises(auth.AuthError):
