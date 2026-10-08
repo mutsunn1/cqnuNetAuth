@@ -46,3 +46,7 @@ python3 auth.py --config /absolute/path/config.json
 ```bash
 python3 -m unittest discover -s tests -v
 ```
+
+## 许可证
+
+本项目使用 [MIT License](LICENSE)。
