@@ -109,8 +109,12 @@ def parse_response(body):
         raise AuthError("认证服务器返回了无法识别的内容。") from None
     if not isinstance(data, dict):
         raise AuthError("认证服务器响应格式不正确。")
+    for key in ("msg", "message"):
+        message = data.get(key)
+        if isinstance(message, str) and "请勿重复登录" in message:
+            return "当前已认证，无需重复登录。"
     if type(data.get("result")) in (int, str) and str(data["result"]) == "1":
-        return
+        return "认证成功。"
     # 不输出服务器原文，其中可能回显账号或密码。
     raise AuthError("服务器未确认认证成功：请检查凭据、IP，或是否已经在线。")
 
@@ -126,7 +130,7 @@ def authenticate(config):
             body = response.read(65537)
             if len(body) > 65536:
                 raise AuthError("认证响应过大，已停止处理。")
-            parse_response(body.decode("utf-8"))
+            return parse_response(body.decode("utf-8"))
     except urllib.error.HTTPError as error:
         raise AuthError(f"认证服务器返回 HTTP {error.code}，请检查校园网连接。") from None
     except (urllib.error.URLError, OSError, UnicodeError, ValueError):
@@ -149,8 +153,7 @@ def main():
         config = load_config(args.config)
         while True:
             try:
-                authenticate(config)
-                print("认证成功。", flush=True)
+                print(authenticate(config), flush=True)
                 status = 0
             except AuthError as error:
                 print(str(error), flush=True)

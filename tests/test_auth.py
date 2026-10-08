@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -27,7 +29,44 @@ class AuthTests(unittest.TestCase):
 
     def test_success_response_formats(self):
         for body in ('{"result":1}', 'dr1005({"result":"1"});'):
-            auth.parse_response(body)
+            self.assertEqual(auth.parse_response(body), "认证成功。")
+
+    def test_already_online_response_formats(self):
+        for key in ("msg", "message"):
+            for escaped in (True, False):
+                payload = json.dumps({"result": 0, key: "请勿重复登录！"},
+                                     ensure_ascii=escaped)
+                for body in (payload, f"dr1005({payload});"):
+                    with self.subTest(key=key, escaped=escaped, body=body):
+                        self.assertEqual(auth.parse_response(body), "当前已认证，无需重复登录。")
+
+    def test_invalid_message_values_are_not_online(self):
+        for value in (None, 123, ["请勿重复登录"], {"text": "请勿重复登录"}):
+            with self.subTest(value=value), self.assertRaises(auth.AuthError):
+                auth.parse_response(json.dumps({"result": 0, "msg": value}))
+
+    def test_already_online_cli_succeeds_without_echoing_credentials(self):
+        payload = json.dumps({"result": 0, "msg": "请勿重复登录：" + self.config["password"]})
+        output = io.StringIO()
+        with patch("sys.argv", ["auth.py"]), \
+             patch("auth.load_config", return_value=self.config), \
+             patch("auth.urllib.request.build_opener") as build, \
+             contextlib.redirect_stdout(output):
+            build.return_value.open.return_value.__enter__.return_value.read.return_value = payload.encode()
+            self.assertEqual(auth.main(), 0)
+        self.assertEqual(output.getvalue(), "当前已认证，无需重复登录。\n")
+
+    def test_watch_continues_after_already_online(self):
+        output = io.StringIO()
+        with patch("sys.argv", ["auth.py", "--watch"]), \
+             patch("auth.load_config", return_value=self.config), \
+             patch("auth.authenticate", side_effect=["当前已认证，无需重复登录。", "认证成功。"]) as login, \
+             patch("auth.time.sleep", side_effect=[None, KeyboardInterrupt]) as sleep, \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(auth.main(), 0)
+        self.assertEqual(login.call_count, 2)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertIn("当前已认证，无需重复登录。\n认证成功。", output.getvalue())
 
     def test_http_ok_is_not_authentication_success(self):
         for body in ('<html>login</html>', '{}', '[]', '{"result":0}',
