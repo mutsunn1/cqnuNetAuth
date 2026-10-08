@@ -1,0 +1,23 @@
+# Local credentials and private captures
+config.json
+config.*.json
+!config.example.json
+.env
+.env.*
+*.log
+*.har
+*.pcap
+*.pcapng
+*.png
+*.jpg
+*.jpeg
+
+# Python / editors / operating systems
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
